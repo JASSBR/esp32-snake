@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>ESP32 SNAKE</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --g:#00ff41;--bg:#070b07;--dim:#1a2e1a;--dead:#ff4141;
+  --cell:10; /* JS overrides via CSS var not needed — just visual reference */
+}
+body{
+  background:var(--bg);color:var(--g);
+  font-family:'Courier New',monospace;
+  min-height:100dvh;display:flex;flex-direction:column;
+  align-items:center;padding:10px 8px 20px;gap:10px;
+  overflow-x:hidden;
+}
+
+/* ── Header ── */
+.title{
+  font-size:1.5rem;letter-spacing:.35em;
+  text-shadow:0 0 12px var(--g),0 0 30px var(--g);
+  user-select:none;
+}
+.status-row{display:flex;align-items:center;gap:12px;font-size:.7rem;}
+.dot{width:7px;height:7px;border-radius:50%;background:#333;transition:background .3s;}
+.dot.on{background:var(--g);box-shadow:0 0 6px var(--g);}
+.dot.dead{background:var(--dead);}
+#connLabel{color:#444;letter-spacing:.1em;}
+#players{color:#444;font-size:.65rem;}
+
+/* ── Scores ── */
+.scores{display:flex;gap:20px;}
+.sb{text-align:center;position:relative;}
+.sb .lbl{font-size:.6rem;color:#444;letter-spacing:.15em;}
+.sb .val{font-size:1.6rem;color:#fff;text-shadow:0 0 8px var(--g);line-height:1.1;transition:transform .15s,color .15s;}
+.sb .val.bump{transform:scale(1.35);color:var(--g);text-shadow:0 0 16px var(--g),0 0 28px var(--g);}
+.sb .val.bump.power{color:#ffcf3f;text-shadow:0 0 16px #ffcf3f,0 0 28px #ffcf3f;}
+.pop{
+  position:absolute;top:-4px;left:50%;transform:translateX(-50%);
+  font-size:.75rem;color:var(--g);text-shadow:0 0 8px var(--g);
+  pointer-events:none;opacity:0;font-weight:bold;
+}
+.pop.power{color:#ffcf3f;text-shadow:0 0 8px #ffcf3f;}
+.pop.rise{animation:popRise .7s ease-out forwards;}
+@keyframes popRise{
+  0%{opacity:1;transform:translateX(-50%) translateY(0);}
+  100%{opacity:0;transform:translateX(-50%) translateY(-22px);}
+}
+
+/* ── Canvas ── */
+.canvas-wrap{position:relative;display:inline-block;}
+canvas{
+  display:block;
+  border:1.5px solid var(--g);
+  box-shadow:0 0 16px rgba(0,255,65,.25),inset 0 0 6px rgba(0,255,65,.04);
+  image-rendering:pixelated;
+  max-width:min(100vw - 16px, 480px);
+}
+.overlay{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;pointer-events:none;background:rgba(7,11,7,.75);
+}
+.overlay.hidden{display:none;}
+.ov-title{
+  font-size:1.8rem;letter-spacing:.2em;
+  text-shadow:0 0 14px var(--g);
+  animation:pulse 1.2s ease-in-out infinite;
+}
+.ov-title.dead{color:var(--dead);text-shadow:0 0 14px var(--dead);}
+.ov-sub{font-size:.75rem;color:#888;letter-spacing:.1em;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+/* ── Speed bar ── */
+.speed-row{display:flex;align-items:center;gap:8px;font-size:.65rem;color:#444;}
+.speed-bar{width:100px;height:4px;background:#111;border-radius:2px;overflow:hidden;}
+.speed-fill{height:100%;background:var(--g);transition:width .3s;border-radius:2px;
+  box-shadow:0 0 4px var(--g);}
+
+/* ── Start btn ── */
+.start-btn{
+  width:min(260px,90vw);height:46px;
+  background:#001a00;border:1.5px solid var(--g);border-radius:8px;
+  color:var(--g);font-family:inherit;font-size:.95rem;letter-spacing:.2em;
+  cursor:pointer;text-shadow:0 0 6px var(--g);
+  box-shadow:0 0 10px rgba(0,255,65,.15);
+  transition:all .15s;
+}
+.start-btn:hover{background:#002600;box-shadow:0 0 20px rgba(0,255,65,.4);}
+.start-btn:disabled{opacity:.4;cursor:default;}
+
+/* ── Name submit ── */
+.name-row{
+  display:none;flex-direction:row;gap:6px;
+  width:min(260px,90vw);
+}
+.name-row input{
+  flex:1;background:#0d1a0d;border:1px solid #2a4a2a;border-radius:6px;
+  color:var(--g);font-family:inherit;padding:8px 10px;font-size:.85rem;outline:none;
+}
+.name-row input:focus{border-color:var(--g);}
+.name-row button{
+  background:#001a00;border:1px solid var(--g);border-radius:6px;
+  color:var(--g);font-family:inherit;padding:8px 12px;cursor:pointer;font-size:.8rem;
+}
+
+/* ── D-pad ── */
+.dpad{
+  display:grid;
+  grid-template-areas:". u ." "l . r" ". d .";
+  grid-template-columns:repeat(3,56px);
+  grid-template-rows:repeat(3,56px);
+  gap:4px;
+}
+.dpad-btn{
+  background:#0d1a0d;border:1.5px solid #1e3a1e;border-radius:10px;
+  color:var(--g);font-size:1.3rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  user-select:none;transition:background .1s,box-shadow .1s,transform .08s;
+}
+.dpad-btn:active,.dpad-btn.flash{
+  background:#002600;box-shadow:0 0 10px var(--g);transform:scale(.92);
+}
+.du{grid-area:u;}.dl{grid-area:l;}.dr{grid-area:r;}.dd{grid-area:d;}
+
+/* ── Leaderboard ── */
+.lb{width:min(280px,90vw);}
+.lb-head{font-size:.65rem;color:#333;letter-spacing:.2em;margin-bottom:6px;}
+.lb-entry{
+  display:flex;justify-content:space-between;
+  padding:5px 8px;font-size:.82rem;border-bottom:1px solid #0e1a0e;
+}
+.lb-entry:nth-child(1){color:#ffd700;}
+.lb-entry:nth-child(2){color:#c0c0c0;}
+.lb-entry:nth-child(3){color:#cd7f32;}
+.lb-empty{color:#2a2a2a;font-size:.75rem;padding:4px 0;}
+
+/* ── Tip ── */
+.tip{font-size:.6rem;color:#2a3a2a;letter-spacing:.08em;text-align:center;}
+</style>
+</head>
+<body>
+
+<div class="title">&#9632; SNAKE</div>
+
+<div class="status-row">
+  <div class="dot" id="dot"></div>
+  <span id="connLabel">CONNECTING...</span>
+  <span id="players"></span>
+</div>
+
+<div class="scores">
+  <div class="sb"><div class="lbl">SCORE</div><div class="val" id="score">0</div><div class="pop" id="scorePop"></div></div>
+  <div class="sb"><div class="lbl">BEST</div><div class="val" id="hi">0</div></div>
+  <div class="sb"><div class="lbl">SPEED</div><div class="val" id="spd">&#x2014;</div></div>
+</div>
+
+<div class="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div class="overlay" id="ov">
+    <div class="ov-title" id="ovTitle">PRESS START</div>
+    <div class="ov-sub" id="ovSub">join ESP32-SNAKE &rarr; 192.168.4.1</div>
+  </div>
+</div>
+
+<div class="speed-row">
+  <span>SLOW</span>
+  <div class="speed-bar"><div class="speed-fill" id="sbar" style="width:0%"></div></div>
+  <span>FAST</span>
+</div>
+
+<button class="start-btn" id="startBtn" onclick="sendStart()">&#9654; START GAME</button>
+
+<div class="name-row" id="nameRow">
+  <input type="text" id="pname" placeholder="YOUR NAME" maxlength="14"
+         onkeydown="if(event.key==='Enter')submitScore()">
+  <button onclick="submitScore()">SAVE &#9650;</button>
+</div>
+
+<div class="dpad">
+  <button class="dpad-btn du" data-d="U" ontouchstart="tap(this,'U')" onclick="tap(this,'U')">&#9650;</button>
+  <button class="dpad-btn dl" data-d="L" ontouchstart="tap(this,'L')" onclick="tap(this,'L')">&#9664;</button>
+  <button class="dpad-btn dr" data-d="R" ontouchstart="tap(this,'R')" onclick="tap(this,'R')">&#9654;</button>
+  <button class="dpad-btn dd" data-d="D" ontouchstart="tap(this,'D')" onclick="tap(this,'D')">&#9660;</button>
+</div>
+
+<div class="lb">
+  <div class="lb-head">&#9733; LEADERBOARD</div>
+  <div id="lbList"><div class="lb-empty">No scores yet</div></div>
+</div>
+
+<div class="tip">WASD / arrows also work &bull; swipe on canvas</div>
+
+<script>
+// ── Canvas setup ──────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const GW = 32, GH = 16;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let gState = 'idle', lastSnake = [], lastFood = [0,0], lastFoodPower = false, lastObstacles = [];
+let prevScore = 0;
+
+function resize() {
+  const maxW = Math.min(window.innerWidth - 16, 480);
+  const cs   = Math.floor(maxW / GW); // cell size in px (min ~10 at 320px)
+  canvas.width  = GW * cs;
+  canvas.height = GH * cs;
+  CS = cs;
+  renderFrame();
+}
+let CS = 10;
+window.addEventListener('resize', resize);
+resize();
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+let sock = null, reconnTimer = null;
+
+function connect() {
+  clearTimeout(reconnTimer);
+  sock = new WebSocket(`ws://${location.host}/ws`);
+
+  sock.onopen = () => {
+    setDot('on', 'CONNECTED');
+  };
+  sock.onclose = () => {
+    setDot('off', 'RECONNECTING...');
+    reconnTimer = setTimeout(connect, 2000);
+  };
+  sock.onerror = () => sock.close();
+  sock.onmessage = e => handle(JSON.parse(e.data));
+}
+
+function send(obj) {
+  if (sock && sock.readyState === 1) sock.send(JSON.stringify(obj));
+}
+
+function setDot(state, label) {
+  const d = document.getElementById('dot');
+  d.className = 'dot' + (state === 'on' ? ' on' : state === 'dead' ? ' dead' : '');
+  document.getElementById('connLabel').textContent = label;
+}
+
+// ── Message handler ────────────────────────────────────────────────────────────
+function handle(m) {
+  if (m.t === 's') {
+    gState = 'playing';
+    lastSnake = m.sn;
+    lastFood  = m.fd;
+    lastFoodPower = !!m.fp;
+    if (m.ob) lastObstacles = m.ob;
+    if (m.sc > prevScore) bumpScore(m.sc - prevScore);
+    prevScore = m.sc;
+    document.getElementById('score').textContent = m.sc;
+    document.getElementById('hi').textContent    = m.hi;
+    // speed: tickMs 200→80, map to 0–100%
+    const pct = Math.round(Math.max(0, (200 - m.tk) / 120 * 100));
+    document.getElementById('spd').textContent = Math.round(1000 / m.tk) + '/s';
+    document.getElementById('sbar').style.width = pct + '%';
+    if (m.pl > 1) document.getElementById('players').textContent = `(+${m.pl - 1} watching)`;
+    else document.getElementById('players').textContent = '';
+    hideOverlay();
+    document.getElementById('startBtn').innerHTML = '&#9646;&#9646; PLAYING...';
+    document.getElementById('startBtn').disabled = true;
+    renderFrame();
+  }
+
+  if (m.t === 'go') {
+    gState = 'dead';
+    document.getElementById('score').textContent = m.sc;
+    document.getElementById('hi').textContent    = m.hi;
+    showOverlay('GAME OVER', 'Score: ' + m.sc + (m.sc === m.hi ? '  &#9733; NEW BEST!' : ''), true);
+    document.getElementById('startBtn').innerHTML = '&#9654; PLAY AGAIN';
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('nameRow').style.display = 'flex';
+    setDot('dead', 'GAME OVER');
+    setTimeout(() => setDot('on', 'CONNECTED'), 1000);
+    playDead();
+  }
+
+  if (m.t === 'idle') {
+    gState = 'idle';
+    prevScore = 0;
+    document.getElementById('hi').textContent = m.hi;
+    if (m.pl > 1) document.getElementById('players').textContent = `(${m.pl} connected)`;
+    showOverlay('PRESS START', 'Use D-pad, WASD, or swipe');
+    document.getElementById('startBtn').innerHTML = '&#9654; START GAME';
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('nameRow').style.display = 'none';
+    renderIdle();
+  }
+
+  if (m.t === 'lb') renderLB(m.e);
+}
+
+// ── Score feedback ────────────────────────────────────────────────────────────
+function bumpScore(delta) {
+  const isPower = delta >= 3;
+  const val = document.getElementById('score');
+  val.classList.remove('bump', 'power');
+  void val.offsetWidth; // restart animation
+  val.classList.add('bump');
+  if (isPower) val.classList.add('power');
+  setTimeout(() => val.classList.remove('bump', 'power'), 200);
+
+  const pop = document.getElementById('scorePop');
+  pop.textContent = '+' + delta;
+  pop.className = 'pop' + (isPower ? ' power' : '');
+  void pop.offsetWidth;
+  pop.classList.add('rise');
+  setTimeout(() => pop.classList.remove('rise'), 700);
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+function tap(btn, d) {
+  send({t:'dir', v:d});
+  btn.classList.add('flash');
+  setTimeout(() => btn.classList.remove('flash'), 100);
+}
+
+function sendStart() {
+  send({t:'start'});
+}
+
+function submitScore() {
+  const n = document.getElementById('pname').value.trim() || 'ANON';
+  send({t:'submit', n});
+  document.getElementById('nameRow').style.display = 'none';
+  document.getElementById('pname').value = '';
+}
+
+const keyMap = {
+  ArrowUp:'U',ArrowDown:'D',ArrowLeft:'L',ArrowRight:'R',
+  w:'U',s:'D',a:'L',d:'R',W:'U',S:'D',A:'L',D:'R'
+};
+document.addEventListener('keydown', e => {
+  if (keyMap[e.key]) { e.preventDefault(); send({t:'dir',v:keyMap[e.key]}); }
+  if ((e.key===' '||e.key==='Enter') && gState !== 'playing') {
+    e.preventDefault(); sendStart();
+  }
+});
+
+// Touch swipe on canvas
+let t0 = null;
+canvas.addEventListener('touchstart', e => {
+  t0 = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+}, {passive:true});
+canvas.addEventListener('touchend', e => {
+  if (!t0) return;
+  const dx = e.changedTouches[0].clientX - t0.x;
+  const dy = e.changedTouches[0].clientY - t0.y;
+  if (Math.abs(dx) < 15 && Math.abs(dy) < 15) { t0=null; return; }
+  send({t:'dir', v: Math.abs(dx)>Math.abs(dy) ? (dx>0?'R':'L') : (dy>0?'D':'U')});
+  t0 = null;
+}, {passive:true});
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+function renderFrame() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#070b07';
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle grid dots
+  ctx.fillStyle = '#0e180e';
+  for (let x=0;x<GW;x++) for (let y=0;y<GH;y++)
+    ctx.fillRect(x*CS+CS/2|0, y*CS+CS/2|0, 1, 1);
+
+  if (!lastSnake.length) return;
+
+  // Obstacles — dim hazard blocks
+  ctx.save();
+  ctx.strokeStyle = '#8a3a3a';
+  ctx.fillStyle   = 'rgba(138,58,58,0.35)';
+  ctx.lineWidth   = 1;
+  lastObstacles.forEach(([ox,oy]) => {
+    ctx.fillRect(ox*CS+1, oy*CS+1, CS-2, CS-2);
+    ctx.strokeRect(ox*CS+1.5, oy*CS+1.5, CS-3, CS-3);
+  });
+  ctx.restore();
+
+  // Food — glowing circle; gold + pulsing when it's a power pickup
+  const [fx,fy] = lastFood;
+  const pulse = lastFoodPower ? (Math.sin(Date.now()/120) * 0.15 + 1) : 1;
+  ctx.save();
+  ctx.shadowColor = lastFoodPower ? '#ffcf3f' : '#ff4141';
+  ctx.shadowBlur  = lastFoodPower ? 14 : 8;
+  ctx.fillStyle   = lastFoodPower ? '#ffcf3f' : '#ff4141';
+  ctx.beginPath();
+  ctx.arc(fx*CS+CS/2, fy*CS+CS/2, (CS/2-1)*pulse, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // Snake
+  lastSnake.forEach(([x,y], i) => {
+    const t = 1 - i / lastSnake.length * 0.65;
+    ctx.save();
+    if (i === 0) {
+      ctx.shadowColor = '#00ff41';
+      ctx.shadowBlur  = 6;
+      ctx.fillStyle   = '#ffffff';
+      ctx.fillRect(x*CS, y*CS, CS, CS);
+    } else {
+      ctx.fillStyle = `rgba(0,255,65,${Math.max(.15, t)})`;
+      ctx.fillRect(x*CS+1, y*CS+1, CS-2, CS-2);
+    }
+    ctx.restore();
+  });
+}
+
+function renderIdle() {
+  ctx.fillStyle = '#070b07';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // decorative static snake
+  const demo = Array.from({length:12},(_,i)=>[8+i,GH/2|0]);
+  demo.forEach(([x,y],i)=>{
+    const a = Math.max(.1, 1-i/demo.length*.8);
+    ctx.fillStyle = i===0 ? '#ffffff' : `rgba(0,255,65,${a})`;
+    ctx.fillRect(x*CS+(i?1:0), y*CS+(i?1:0), CS-(i?2:0), CS-(i?2:0));
+  });
+}
+
+// ── Overlay helpers ────────────────────────────────────────────────────────────
+function showOverlay(title, sub, dead=false) {
+  const ov = document.getElementById('ov');
+  const t  = document.getElementById('ovTitle');
+  const s  = document.getElementById('ovSub');
+  t.className = 'ov-title' + (dead ? ' dead' : '');
+  t.innerHTML = title;
+  s.innerHTML = sub;
+  ov.classList.remove('hidden');
+}
+function hideOverlay() {
+  document.getElementById('ov').classList.add('hidden');
+}
+
+// ── Leaderboard ────────────────────────────────────────────────────────────────
+function renderLB(entries) {
+  const medals = ['&#127937;','&#127938;','&#127939;'];
+  const el = document.getElementById('lbList');
+  if (!entries || !entries.length) {
+    el.innerHTML = '<div class="lb-empty">No scores yet &mdash; be the first!</div>';
+    return;
+  }
+  el.innerHTML = entries.map((e,i)=>
+    `<div class="lb-entry">
+       <span>${medals[i]||((i+1)+'.')} ${e.n}</span>
+       <span>${e.s}</span>
+     </div>`
+  ).join('');
+}
+
+// ── Sound (Web Audio) ──────────────────────────────────────────────────────────
+let ac = null;
+function getAC() {
+  if (!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+  return ac;
+}
+function beep(freq, dur, type='square', vol=0.08) {
+  try {
+    const a = getAC();
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.connect(g); g.connect(a.destination);
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001, a.currentTime+dur);
+    o.start(); o.stop(a.currentTime+dur);
+  } catch(e){}
+}
+function playDead() {
+  beep(330,.1); setTimeout(()=>beep(250,.1),120); setTimeout(()=>beep(165,.35),240);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+renderIdle();
+connect();
+</script>
+</body>
+</html>
