@@ -201,7 +201,7 @@ const ctx    = canvas.getContext('2d');
 const GW = 32, GH = 16;
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let gState = 'idle', lastSnake = [], lastFood = [0,0], lastFoodPower = false, lastObstacles = [];
+let gState = 'idle', lastSnake = [], lastFood = [0,0], lastFoodPower = false;
 let prevScore = 0;
 
 function resize() {
@@ -251,7 +251,6 @@ function handle(m) {
     lastSnake = m.sn;
     lastFood  = m.fd;
     lastFoodPower = !!m.fp;
-    if (m.ob) lastObstacles = m.ob;
     if (m.sc > prevScore) bumpScore(m.sc - prevScore);
     prevScore = m.sc;
     document.getElementById('score').textContent = m.sc;
@@ -337,6 +336,7 @@ const keyMap = {
   w:'U',s:'D',a:'L',d:'R',W:'U',S:'D',A:'L',D:'R'
 };
 document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
   if (keyMap[e.key]) { e.preventDefault(); send({t:'dir',v:keyMap[e.key]}); }
   if ((e.key===' '||e.key==='Enter') && gState !== 'playing') {
     e.preventDefault(); sendStart();
@@ -369,17 +369,6 @@ function renderFrame() {
     ctx.fillRect(x*CS+CS/2|0, y*CS+CS/2|0, 1, 1);
 
   if (!lastSnake.length) return;
-
-  // Obstacles — dim hazard blocks
-  ctx.save();
-  ctx.strokeStyle = '#8a3a3a';
-  ctx.fillStyle   = 'rgba(138,58,58,0.35)';
-  ctx.lineWidth   = 1;
-  lastObstacles.forEach(([ox,oy]) => {
-    ctx.fillRect(ox*CS+1, oy*CS+1, CS-2, CS-2);
-    ctx.strokeRect(ox*CS+1.5, oy*CS+1.5, CS-3, CS-3);
-  });
-  ctx.restore();
 
   // Food — glowing circle; gold + pulsing when it's a power pickup
   const [fx,fy] = lastFood;

@@ -42,11 +42,6 @@ enum Dir   : uint8_t { R, L, U, D };
 enum State : uint8_t { IDLE, PLAYING, DEAD };
 struct Pt  { int8_t x, y; };
 
-// ─── Obstacles ────────────────────────────────────────────────────────────────
-#define MAX_OBS 8
-Pt  obstacles[MAX_OBS];
-int obsCount=0;
-
 // ─── Game state ───────────────────────────────────────────────────────────────
 Pt    body[MAX_SNAKE];
 int   bodyLen = 0;
@@ -84,15 +79,13 @@ void updateLED(){
 // ─── Broadcast helpers ────────────────────────────────────────────────────────
 void broadcastState() {
   if(!ws.count()) return;
-  String m; m.reserve(bodyLen*8+obsCount*8+100);
+  String m; m.reserve(bodyLen*8+100);
   m="{\"t\":\"s\",\"sc\":"; m+=score;
   m+=",\"hi\":"; m+=hiScore; m+=",\"tk\":"; m+=tickMs;
   m+=",\"pl\":"; m+=(int)ws.count(); m+=",\"sn\":[";
   for(int i=0;i<bodyLen;i++){if(i)m+=','; m+='[';m+=body[i].x;m+=',';m+=body[i].y;m+=']';}
   m+="],\"fd\":["; m+=food.x; m+=','; m+=food.y; m+="],\"fp\":"; m+=(foodPower?1:0);
-  m+=",\"ob\":[";
-  for(int i=0;i<obsCount;i++){if(i)m+=','; m+='[';m+=obstacles[i].x;m+=',';m+=obstacles[i].y;m+=']';}
-  m+="]}";
+  m+="}";
   ws.textAll(m);
 }
 void broadcastGameOver(){
@@ -110,28 +103,12 @@ void broadcastIdle(){
 }
 
 // ─── Game logic ───────────────────────────────────────────────────────────────
-bool cellBlocked(Pt f){
-  for(int i=0;i<bodyLen;i++) if(body[i].x==f.x&&body[i].y==f.y) return true;
-  for(int i=0;i<obsCount;i++) if(obstacles[i].x==f.x&&obstacles[i].y==f.y) return true;
-  return false;
-}
 void spawnFood(){
   for(int t=0;t<300;t++){
     Pt f={(int8_t)random(0,GW),(int8_t)random(0,GH)};
-    if(!cellBlocked(f)){food=f;foodPower=(random(0,100)<25);return;}
-  }
-}
-void placeObstacles(){
-  obsCount=4+random(0,MAX_OBS-3); // 4..MAX_OBS
-  for(int i=0;i<obsCount;i++){
-    for(int t=0;t<300;t++){
-      Pt o={(int8_t)random(0,GW),(int8_t)random(0,GH)};
-      // keep clear of the snake's starting lane and give it breathing room
-      if(abs(o.x-GW/2)<4 && abs(o.y-GH/2)<2) continue;
-      bool hit=false;
-      for(int j=0;j<i&&!hit;j++) hit=(obstacles[j].x==o.x&&obstacles[j].y==o.y);
-      if(!hit){obstacles[i]=o;break;}
-    }
+    bool hit=false;
+    for(int i=0;i<bodyLen&&!hit;i++) hit=(body[i].x==f.x&&body[i].y==f.y);
+    if(!hit){food=f;foodPower=(random(0,100)<25);return;}
   }
 }
 void startGame(){
@@ -140,7 +117,7 @@ void startGame(){
   body[1]={(int8_t)(GW/2-1),(int8_t)(GH/2)};
   body[2]={(int8_t)(GW/2-2),(int8_t)(GH/2)};
   dir=R;nextDir=R;score=0;tickMs=200;gameState=PLAYING;
-  placeObstacles();spawnFood();
+  spawnFood();
 }
 void addToLeaderboard(const char* name,int s){
   int pos=lbCount;
@@ -162,12 +139,6 @@ void gameTick(){
   }
   for(int i=0;i<bodyLen-1;i++){
     if(body[i].x==h.x&&body[i].y==h.y){
-      gameState=DEAD;if(score>hiScore){hiScore=score;prefs.putInt("hi",hiScore);}
-      flashLED(led.Color(50,0,0),600);broadcastGameOver();return;
-    }
-  }
-  for(int i=0;i<obsCount;i++){
-    if(obstacles[i].x==h.x&&obstacles[i].y==h.y){
       gameState=DEAD;if(score>hiScore){hiScore=score;prefs.putInt("hi",hiScore);}
       flashLED(led.Color(50,0,0),600);broadcastGameOver();return;
     }
@@ -201,7 +172,6 @@ void drawOLED(){
     oled.setTextSize(1);oled.setCursor(0,30);oled.print("Score : ");oled.print(score);
     oled.setCursor(0,42);oled.print("Best  : ");oled.print(hiScore);oled.display();return;
   }
-  for(int i=0;i<obsCount;i++) oled.drawRect(obstacles[i].x*CELL,obstacles[i].y*CELL,CELL,CELL,SSD1306_WHITE);
   if(!foodPower || (millis()/200)%2==0){
     if(foodPower) oled.drawRect(food.x*CELL,food.y*CELL,CELL,CELL,SSD1306_WHITE);
     oled.fillRect(food.x*CELL+1,food.y*CELL+1,2,2,SSD1306_WHITE);
