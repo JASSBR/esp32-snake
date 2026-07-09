@@ -51,6 +51,7 @@ struct Player {
   bool connected=false;
 };
 Player players[NUM_PLAYERS];
+bool   submitted[NUM_PLAYERS];
 
 // ─── Game state ───────────────────────────────────────────────────────────────
 Pt    food    = {GW/2+5, GH/2};
@@ -112,7 +113,8 @@ void broadcastGameOver(){
   String m="{\"t\":\"go\",\"hi\":"; m+=hiScore; m+=",\"p\":[";
   for(int i=0;i<NUM_PLAYERS;i++){
     if(i)m+=',';
-    m+="{\"sc\":"; m+=players[i].score; m+=",\"al\":"; m+=(players[i].alive?1:0); m+='}';
+    m+="{\"sc\":"; m+=players[i].score; m+=",\"al\":"; m+=(players[i].alive?1:0);
+    m+=",\"in\":"; m+=(players[i].len>0?1:0); m+='}';
   }
   m+="]}";
   ws.textAll(m);
@@ -151,6 +153,7 @@ void startGame(){
   resetPlayer(0,GW/4,GH/2-2,R);
   if(players[1].connected) resetPlayer(1,GW*3/4,GH/2+2,L);
   else { players[1].len=0; players[1].alive=false; }
+  submitted[0]=false; submitted[1]=false;
   tickMs=200;gameState=PLAYING;
   spawnFood();
 }
@@ -271,7 +274,15 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
   if(type==WS_EVT_DISCONNECT){
     Serial.printf("[ws] #%u disconnected\n",client->id());
     int slot=playerSlotFor(client->id());
-    if(slot>=0){ players[slot].connected=false; players[slot].clientId=0; }
+    if(slot>=0){
+      players[slot].connected=false; players[slot].clientId=0;
+      if(gameState==DEAD&&!submitted[slot]){
+        submitted[slot]=true;
+        bool allDone=true;
+        for(int i=0;i<NUM_PLAYERS;i++) if(players[i].len>0&&!submitted[i]) allDone=false;
+        if(allDone){ gameState=IDLE; broadcastIdle(); }
+      }
+    }
     return;
   }
   if(type!=WS_EVT_DATA) return;
@@ -301,11 +312,15 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client,
     if(gameState==IDLE||gameState==DEAD){startGame();broadcastState();}
   }
   else if(strcmp(t,"submit")==0&&gameState==DEAD){
-    const char* name=doc["n"]|"ANON";
     int slot=playerSlotFor(client->id());
-    int s=(slot>=0)?players[slot].score:0;
-    addToLeaderboard(name,s);broadcastLeaderboard();
-    gameState=IDLE;broadcastIdle();
+    if(slot>=0&&players[slot].len>0&&!submitted[slot]){
+      const char* name=doc["n"]|"ANON";
+      addToLeaderboard(name,players[slot].score);broadcastLeaderboard();
+      submitted[slot]=true;
+    }
+    bool allDone=true;
+    for(int i=0;i<NUM_PLAYERS;i++) if(players[i].len>0&&!submitted[i]) allDone=false;
+    if(allDone){ gameState=IDLE; broadcastIdle(); }
   }
 }
 

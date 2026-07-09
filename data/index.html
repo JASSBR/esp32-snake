@@ -292,7 +292,7 @@ function handle(m) {
     document.getElementById('score').textContent = mine.sc;
     document.getElementById('hi').textContent    = m.hi;
     let title, sub;
-    if (opp) {
+    if (opp && opp.in) {
       title = mine.al === opp.al ? 'DRAW' : (mine.al ? 'YOU WIN' : 'YOU LOSE');
       sub = `You: ${mine.sc}  Opponent: ${opp.sc}`;
     } else {
