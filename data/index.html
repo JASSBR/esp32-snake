@@ -154,6 +154,7 @@ canvas{
 
 <div class="scores">
   <div class="sb"><div class="lbl">SCORE</div><div class="val" id="score">0</div><div class="pop" id="scorePop"></div></div>
+  <div class="sb" id="oppBox" style="display:none"><div class="lbl">OPPONENT</div><div class="val" id="opp">0</div></div>
   <div class="sb"><div class="lbl">BEST</div><div class="val" id="hi">0</div></div>
   <div class="sb"><div class="lbl">SPEED</div><div class="val" id="spd">&#x2014;</div></div>
 </div>
@@ -162,7 +163,7 @@ canvas{
   <canvas id="c"></canvas>
   <div class="overlay" id="ov">
     <div class="ov-title" id="ovTitle">PRESS START</div>
-    <div class="ov-sub" id="ovSub">join ESP32-SNAKE &rarr; 192.168.4.1</div>
+    <div class="ov-sub" id="ovSub">Use D-pad, WASD, or swipe</div>
   </div>
 </div>
 
@@ -201,7 +202,9 @@ const ctx    = canvas.getContext('2d');
 const GW = 32, GH = 16;
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let gState = 'idle', lastSnake = [], lastFood = [0,0], lastFoodPower = false;
+let gState = 'idle', lastFood = [0,0], lastFoodPower = false;
+let lastPlayers = [{sn:[],sc:0,al:true},{sn:[],sc:0,al:true}];
+let myPlayer = 0;
 let prevScore = 0;
 
 function resize() {
@@ -246,21 +249,35 @@ function setDot(state, label) {
 
 // ── Message handler ────────────────────────────────────────────────────────────
 function handle(m) {
+  if (m.t === 'you') {
+    myPlayer = m.p; // -1 means spectator
+    return;
+  }
+
   if (m.t === 's') {
     gState = 'playing';
-    lastSnake = m.sn;
+    lastPlayers = m.p;
     lastFood  = m.fd;
     lastFoodPower = !!m.fp;
-    if (m.sc > prevScore) bumpScore(m.sc - prevScore);
-    prevScore = m.sc;
-    document.getElementById('score').textContent = m.sc;
+    const mine = lastPlayers[myPlayer] || lastPlayers[0];
+    const opp  = lastPlayers[1 - myPlayer];
+    if (mine.sc > prevScore) bumpScore(mine.sc - prevScore);
+    prevScore = mine.sc;
+    document.getElementById('score').textContent = mine.sc;
     document.getElementById('hi').textContent    = m.hi;
+    const oppBox = document.getElementById('oppBox');
+    if (opp && opp.sn && opp.sn.length) {
+      oppBox.style.display = '';
+      document.getElementById('opp').textContent = opp.sc;
+    } else {
+      oppBox.style.display = 'none';
+    }
     // speed: tickMs 200→80, map to 0–100%
     const pct = Math.round(Math.max(0, (200 - m.tk) / 120 * 100));
     document.getElementById('spd').textContent = Math.round(1000 / m.tk) + '/s';
     document.getElementById('sbar').style.width = pct + '%';
-    if (m.pl > 1) document.getElementById('players').textContent = `(+${m.pl - 1} watching)`;
-    else document.getElementById('players').textContent = '';
+    const watchers = m.pl - (opp && opp.sn && opp.sn.length ? 2 : 1);
+    document.getElementById('players').textContent = watchers > 0 ? `(+${watchers} watching)` : '';
     hideOverlay();
     document.getElementById('startBtn').innerHTML = '&#9646;&#9646; PLAYING...';
     document.getElementById('startBtn').disabled = true;
@@ -269,9 +286,20 @@ function handle(m) {
 
   if (m.t === 'go') {
     gState = 'dead';
-    document.getElementById('score').textContent = m.sc;
+    lastPlayers = m.p;
+    const mine = lastPlayers[myPlayer] || lastPlayers[0];
+    const opp  = lastPlayers[1 - myPlayer];
+    document.getElementById('score').textContent = mine.sc;
     document.getElementById('hi').textContent    = m.hi;
-    showOverlay('GAME OVER', 'Score: ' + m.sc + (m.sc === m.hi ? '  &#9733; NEW BEST!' : ''), true);
+    let title, sub;
+    if (opp) {
+      title = mine.al === opp.al ? 'DRAW' : (mine.al ? 'YOU WIN' : 'YOU LOSE');
+      sub = `You: ${mine.sc}  Opponent: ${opp.sc}`;
+    } else {
+      title = 'GAME OVER';
+      sub = 'Score: ' + mine.sc + (mine.sc === m.hi ? '  &#9733; NEW BEST!' : '');
+    }
+    showOverlay(title, sub, true);
     document.getElementById('startBtn').innerHTML = '&#9654; PLAY AGAIN';
     document.getElementById('startBtn').disabled = false;
     document.getElementById('nameRow').style.display = 'flex';
@@ -284,6 +312,7 @@ function handle(m) {
     gState = 'idle';
     prevScore = 0;
     document.getElementById('hi').textContent = m.hi;
+    document.getElementById('oppBox').style.display = 'none';
     if (m.pl > 1) document.getElementById('players').textContent = `(${m.pl} connected)`;
     showOverlay('PRESS START', 'Use D-pad, WASD, or swipe');
     document.getElementById('startBtn').innerHTML = '&#9654; START GAME';
@@ -368,7 +397,8 @@ function renderFrame() {
   for (let x=0;x<GW;x++) for (let y=0;y<GH;y++)
     ctx.fillRect(x*CS+CS/2|0, y*CS+CS/2|0, 1, 1);
 
-  if (!lastSnake.length) return;
+  const anyAlive = lastPlayers.some(p => p.sn && p.sn.length);
+  if (!anyAlive) return;
 
   // Food — glowing circle; gold + pulsing when it's a power pickup
   const [fx,fy] = lastFood;
@@ -382,20 +412,25 @@ function renderFrame() {
   ctx.fill();
   ctx.restore();
 
-  // Snake
-  lastSnake.forEach(([x,y], i) => {
-    const t = 1 - i / lastSnake.length * 0.65;
-    ctx.save();
-    if (i === 0) {
-      ctx.shadowColor = '#00ff41';
-      ctx.shadowBlur  = 6;
-      ctx.fillStyle   = '#ffffff';
-      ctx.fillRect(x*CS, y*CS, CS, CS);
-    } else {
-      ctx.fillStyle = `rgba(0,255,65,${Math.max(.15, t)})`;
-      ctx.fillRect(x*CS+1, y*CS+1, CS-2, CS-2);
-    }
-    ctx.restore();
+  // Snakes — mine in green, opponent in cyan
+  lastPlayers.forEach((p, idx) => {
+    if (!p.sn || !p.sn.length) return;
+    const isMine = idx === myPlayer || myPlayer < 0;
+    const color = isMine ? '0,255,65' : '0,212,255';
+    p.sn.forEach(([x,y], i) => {
+      const t = 1 - i / p.sn.length * 0.65;
+      ctx.save();
+      if (i === 0) {
+        ctx.shadowColor = `rgb(${color})`;
+        ctx.shadowBlur  = 6;
+        ctx.fillStyle   = '#ffffff';
+        ctx.fillRect(x*CS, y*CS, CS, CS);
+      } else {
+        ctx.fillStyle = `rgba(${color},${Math.max(.15, t)})`;
+        ctx.fillRect(x*CS+1, y*CS+1, CS-2, CS-2);
+      }
+      ctx.restore();
+    });
   });
 }
 
