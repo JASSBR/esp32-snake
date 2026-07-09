@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Stub WiFi credentials
+        run: cp secrets.h.example secrets.h
+
       - name: Compile sketch
         uses: arduino/compile-sketches@v1
         with:
